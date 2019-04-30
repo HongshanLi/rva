@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "main.py", line 3, in <module>
+    from trainer import Trainer
+  File "/home/li108/ML/rva/trainer.py", line 13, in <module>
+    from tqdm import tqdm
+ModuleNotFoundError: No module named 'tqdm'

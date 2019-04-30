@@ -105,6 +105,7 @@ class Trainer(object):
             self.std, self.hidden_size, self.num_classes,
         )
         if self.use_gpu:
+            print("Using GPU")
             self.model.cuda()
 
         print('[*] Number of model parameters: {:,}'.format(
@@ -215,8 +216,9 @@ class Trainer(object):
             for i, (x, y) in enumerate(self.train_loader):
                 if self.use_gpu:
                     x, y = x.cuda(), y.cuda()
-                x, y = Variable(x), Variable(y)
-
+                if i == 0:
+                    print(x, y)
+                
                 plot = False
                 if (epoch % self.plot_freq == 0) and (i == 0):
                     plot = True
@@ -271,14 +273,20 @@ class Trainer(object):
 
                 # sum up into a hybrid loss
                 loss = loss_action + loss_baseline + loss_reinforce
-
+               
+                if i % 100 == 0:
+                    correct = (predicted == y).float()
+                    acc = 100*(correct.sum() / len(y))
+                    print("Step: {}; Loss: {}; Accuracy: {}".format(
+                        i, loss, acc)) 
+                """
                 # compute accuracy
-                correct = (predicted == y).float()
-                acc = 100 * (correct.sum() / len(y))
+                #correct = (predicted == y).float()
+                #acc = 100 * (correct.sum() / len(y))
 
                 # store
-                losses.update(loss.item(), x.size()[0])
-                accs.update(acc.item(), x.size()[0])
+                #losses.update(loss.item(), x.size()[0])
+                #accs.update(acc.item(), x.size()[0])
 
                 # compute gradients and update SGD
                 self.optimizer.zero_grad()
@@ -297,6 +305,7 @@ class Trainer(object):
                     )
                 )
                 pbar.update(self.batch_size)
+                """
 
                 # dump the glimpses and locs
                 if plot:
@@ -324,8 +333,10 @@ class Trainer(object):
                     iteration = epoch*len(self.train_loader) + i
                     log_value('train_loss', losses.avg, iteration)
                     log_value('train_acc', accs.avg, iteration)
-
-            return losses.avg, accs.avg
+        
+        duration = time.time() - tic
+        print("Time for training one epoch is: {}".format(duration))
+        return losses.avg, accs.avg
 
     def validate(self, epoch):
         """
