@@ -243,10 +243,10 @@ class glimpse_network(nn.Module):
         self.retina = retina(g, k, s)
 
         # glimpse layer for image
-        self.planes = [c, 12, 24, 48, 96]
-        self.num_blocks = [1 for _ in range(4)]
+        self.planes = [3, 12, 24, 48]
+        self.num_blocks = [1 for _ in range(3)]
 
-        res_blocks = []
+        self.res_blocks = []
         for i in range(len(self.planes) -1):
             res_block = nn.Sequential(
                 self._make_layer(block, self.planes[i], self.num_blocks[i]),
@@ -254,9 +254,10 @@ class glimpse_network(nn.Module):
                           kernel_size=2, stride=2),
                 nn.ReLU(inplace=True)
             )
-            res_blocks.append(res_block)
+            self.res_blocks.append(res_block)
         
-        self.feature_extractor = nn.Sequential(*res_blocks)
+        self.feature_extractor = nn.Sequential(*self.res_blocks)
+        
 
         self.fc1 = nn.Linear(self.planes[-1], h_g)
 
@@ -270,11 +271,10 @@ class glimpse_network(nn.Module):
     def forward(self, x, l_t_prev):
         # generate glimpse phi from image x
         phi = self.retina.foveate(x, l_t_prev)
-    
         # extract features from the glimpse
         phi = self.feature_extractor(phi)
 
-        # flatten the features
+        # flatten the feature
         phi = phi.view(phi.shape[0], -1)
 
         # feed phi and l to respective fc layers

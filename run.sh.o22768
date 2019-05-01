@@ -1,0 +1,53 @@
+/apps/cent7/anaconda/5.1.0-py36/bin/conda
+
+Currently Loaded Modules:
+  1) intel/17.0.1.132       5) cuda/9.0.176
+  2) impi/2017.1.132        6) cudnn/cuda-9.0_7.4
+  3) xalt             (S)   7) anaconda/5.1.0-py36
+  4) rcac                   8) learning/conda-5.1.0-py36-gpu
+
+  Where:
+   S:  Module is Sticky, requires --force to unload or purge
+
+ 
+
+  0%|          | 0/45000 [00:00<?, ?it/s]Files already downloaded and verified
+Using GPU
+[*] Number of model parameters: 293,231
+[*] Model Checkpoint Dir: ./ckpt
+[*] Param Path: ./ckpt/ram_6_8x8_2_params.json
+
+[*] Train on 45000 samples, validate on 5000 samples
+
+Epoch: 1/1 - LR: 0.000300
+
+Traceback (most recent call last):
+  File "main.py", line 48, in <module>
+    main(config)
+  File "main.py", line 39, in main
+    trainer.train()
+  File "/home/li108/ML/rva/trainer.py", line 169, in train
+    train_loss, train_acc = self.train_one_epoch(epoch)
+  File "/home/li108/ML/rva/trainer.py", line 238, in train_one_epoch
+    h_t, l_t, b_t, p = self.model(x, l_t, h_t)
+  File "/home/li108/.conda/envs/cent7/5.1.0-py36/pytorch/lib/python3.7/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/home/li108/ML/rva/model.py", line 101, in forward
+    g_t = self.sensor(x, l_t_prev)
+  File "/home/li108/.conda/envs/cent7/5.1.0-py36/pytorch/lib/python3.7/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/home/li108/ML/rva/modules.py", line 275, in forward
+    phi = self.feature_extractor(phi)
+  File "/home/li108/.conda/envs/cent7/5.1.0-py36/pytorch/lib/python3.7/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/home/li108/.conda/envs/cent7/5.1.0-py36/pytorch/lib/python3.7/site-packages/torch/nn/modules/container.py", line 92, in forward
+    input = module(input)
+  File "/home/li108/.conda/envs/cent7/5.1.0-py36/pytorch/lib/python3.7/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/home/li108/.conda/envs/cent7/5.1.0-py36/pytorch/lib/python3.7/site-packages/torch/nn/modules/container.py", line 92, in forward
+    input = module(input)
+  File "/home/li108/.conda/envs/cent7/5.1.0-py36/pytorch/lib/python3.7/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/home/li108/.conda/envs/cent7/5.1.0-py36/pytorch/lib/python3.7/site-packages/torch/nn/modules/conv.py", line 320, in forward
+    self.padding, self.dilation, self.groups)
+RuntimeError: cuDNN error: CUDNN_STATUS_BAD_PARAM

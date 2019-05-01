@@ -15,6 +15,8 @@ from utils import AverageMeter
 from model import RecurrentAttention
 from tensorboard_logger import configure, log_value
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(device)
 
 class Trainer(object):
     """
@@ -106,7 +108,7 @@ class Trainer(object):
         )
         if self.use_gpu:
             print("Using GPU")
-            self.model.cuda()
+            self.model = self.model.to(device)
 
         print('[*] Number of model parameters: {:,}'.format(
             sum([p.data.nelement() for p in self.model.parameters()])))

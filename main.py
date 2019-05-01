@@ -5,7 +5,7 @@ from config import get_config
 from utils import prepare_dirs, save_config
 from data_loader import get_test_loader, get_train_valid_loader
 
-
+torch.backends.cudnn.enabled=False
 def main(config):
 
     # ensure directories are setup
