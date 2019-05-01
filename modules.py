@@ -63,7 +63,7 @@ class retina(object):
 
         # concatenate into a single tensor and flatten
         phi = torch.cat(phi, 1)
-        phi = phi.view(phi.shape[0], -1)
+        #phi = phi.view(phi.shape[0], -1)
 
         return phi
 
@@ -150,9 +150,60 @@ class retina(object):
         return False
 
 
+def conv3x3(in_planes, out_planes, stride=1, groups=1):
+  """
+  3x3 convolution with padding
+  """
+  return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                   padding=1, groups=groups, bias=False)
+
+class BasicBlock(nn.Module):
+  expansion = 1
+
+  def __init__(self, inplanes, planes, stride=1, 
+    downsample=None, groups=1, norm_layer=None):
+        
+    super(BasicBlock, self).__init__()
+    
+    if norm_layer is None:
+      norm_layer = nn.BatchNorm2d
+    if groups != 1:
+      raise ValueError('BasicBlock only supports groups=1')
+    # Both self.conv1 and self.downsample layers downsample the input when stride != 1
+    
+    self.conv1 = conv3x3(inplanes, planes, stride)
+    self.bn1 = norm_layer(planes)
+    self.relu = nn.ReLU(inplace=True)
+    self.conv2 = conv3x3(planes, planes)
+    self.bn2 = norm_layer(planes)
+
+    self.downsample = downsample
+    self.stride = stride
+
+  def forward(self, x):
+    identity = x
+
+    out = self.conv1(x)
+    out = self.bn1(out)
+    out = self.relu(out)
+
+    out = self.conv2(out)
+    out = self.bn2(out)
+
+    if self.downsample is not None:
+        identity = self.downsample(x)
+
+    out += identity
+    out = self.relu(out)
+
+    return out
+
+
+
+
 class glimpse_network(nn.Module):
     """
-    A network that combines the "what" and the "where"
+    A convolution network that combines the "what" and the "where"
     into a glimpse feature vector `g_t`.
 
     - "what": glimpse extracted from the retina.
@@ -165,10 +216,10 @@ class glimpse_network(nn.Module):
 
     In other words:
 
-        `g_t = relu( fc( fc(l) ) + fc( fc(phi) ) )`
 
     Args
     ----
+    - block: block in residue layers
     - h_g: hidden layer size of the fc layer for `phi`.
     - h_l: hidden layer size of the fc layer for `l`.
     - g: size of the square patches in the glimpses extracted
@@ -176,7 +227,7 @@ class glimpse_network(nn.Module):
     - k: number of patches to extract per glimpse.
     - s: scaling factor that controls the size of successive patches.
     - c: number of channels in each image.
-    - x: a 4D Tensor of shape (B, H, W, C). The minibatch
+    - x: a 4D Tensor of shape (B, C, H, W). The minibatch
       of images.
     - l_t_prev: a 2D tensor of shape (B, 2). Contains the glimpse
       coordinates [x, y] for the previous timestep `t-1`.
@@ -187,13 +238,27 @@ class glimpse_network(nn.Module):
       representation returned by the glimpse network for the
       current timestep `t`.
     """
-    def __init__(self, h_g, h_l, g, k, s, c):
+    def __init__(self, block, h_g, h_l, g, k, s, c):
         super(glimpse_network, self).__init__()
         self.retina = retina(g, k, s)
 
-        # glimpse layer
-        D_in = k*g*g*c
-        self.fc1 = nn.Linear(D_in, h_g)
+        # glimpse layer for image
+        self.planes = [c, 12, 24, 48, 96]
+        self.num_blocks = [1 for _ in range(4)]
+
+        res_blocks = []
+        for i in range(len(self.planes) -1):
+            res_block = nn.Sequential(
+                self._make_layer(block, self.planes[i], self.num_blocks[i]),
+                nn.Conv2d(self.planes[i], self.planes[i+1],
+                          kernel_size=2, stride=2),
+                nn.ReLU(inplace=True)
+            )
+            res_blocks.append(res_block)
+        
+        self.feature_extractor = nn.Sequential(*res_blocks)
+
+        self.fc1 = nn.Linear(self.planes[-1], h_g)
 
         # location layer
         D_in = 2
@@ -205,9 +270,12 @@ class glimpse_network(nn.Module):
     def forward(self, x, l_t_prev):
         # generate glimpse phi from image x
         phi = self.retina.foveate(x, l_t_prev)
+    
+        # extract features from the glimpse
+        phi = self.feature_extractor(phi)
 
-        # flatten location vector
-        l_t_prev = l_t_prev.view(l_t_prev.size(0), -1)
+        # flatten the features
+        phi = phi.view(phi.shape[0], -1)
 
         # feed phi and l to respective fc layers
         phi_out = F.relu(self.fc1(phi))
@@ -221,6 +289,11 @@ class glimpse_network(nn.Module):
 
         return g_t
 
+    def _make_layer(self, block, planes, num_blocks):
+        layers = []
+        for _ in range(num_blocks):
+            layers.append(block(planes, planes))
+        return nn.Sequential(*layers)
 
 class core_network(nn.Module):
     """

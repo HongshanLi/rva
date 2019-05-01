@@ -51,7 +51,7 @@ def get_train_valid_loader(data_dir,
     ])
 
     # load dataset
-    dataset = datasets.MNIST(
+    dataset = datasets.CIFAR10(
         data_dir, train=True, download=True, transform=trans
     )
 

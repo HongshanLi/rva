@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from torch.distributions import Normal
 
-from modules import baseline_network
+from modules import baseline_network, BasicBlock
 from modules import glimpse_network, core_network
 from modules import action_network, location_network
 
@@ -56,7 +56,7 @@ class RecurrentAttention(nn.Module):
         super(RecurrentAttention, self).__init__()
         self.std = std
 
-        self.sensor = glimpse_network(h_g, h_l, g, k, s, c)
+        self.sensor = glimpse_network(BasicBlock, h_g, h_l, g, k, s, c)
         self.rnn = core_network(hidden_size, hidden_size)
         self.locator = location_network(hidden_size, 2, std)
         self.classifier = action_network(hidden_size, num_classes)

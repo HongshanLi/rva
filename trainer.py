@@ -60,7 +60,7 @@ class Trainer(object):
             self.test_loader = data_loader
             self.num_test = len(self.test_loader.dataset)
         self.num_classes = 10
-        self.num_channels = 1
+        self.num_channels = 3
 
         # training params
         self.epochs = config.epochs
@@ -216,8 +216,6 @@ class Trainer(object):
             for i, (x, y) in enumerate(self.train_loader):
                 if self.use_gpu:
                     x, y = x.cuda(), y.cuda()
-                if i == 0:
-                    print(x, y)
                 
                 plot = False
                 if (epoch % self.plot_freq == 0) and (i == 0):
@@ -273,20 +271,15 @@ class Trainer(object):
 
                 # sum up into a hybrid loss
                 loss = loss_action + loss_baseline + loss_reinforce
+                
                
-                if i % 100 == 0:
-                    correct = (predicted == y).float()
-                    acc = 100*(correct.sum() / len(y))
-                    print("Step: {}; Loss: {}; Accuracy: {}".format(
-                        i, loss, acc)) 
-                """
                 # compute accuracy
-                #correct = (predicted == y).float()
-                #acc = 100 * (correct.sum() / len(y))
+                correct = (predicted == y).float()
+                acc = 100 * (correct.sum() / len(y))
 
                 # store
-                #losses.update(loss.item(), x.size()[0])
-                #accs.update(acc.item(), x.size()[0])
+                losses.update(loss.item(), x.size()[0])
+                accs.update(acc.item(), x.size()[0])
 
                 # compute gradients and update SGD
                 self.optimizer.zero_grad()
@@ -305,16 +298,15 @@ class Trainer(object):
                     )
                 )
                 pbar.update(self.batch_size)
-                """
 
                 # dump the glimpses and locs
                 if plot:
                     if self.use_gpu:
-                        imgs = [g.cpu().data.numpy().squeeze() for g in imgs]
-                        locs = [l.cpu().data.numpy() for l in locs]
+                        imgs = [g.cpu().detach().numpy().squeeze() for g in imgs]
+                        locs = [l.cpu().detach().numpy() for l in locs]
                     else:
-                        imgs = [g.data.numpy().squeeze() for g in imgs]
-                        locs = [l.data.numpy() for l in locs]
+                        imgs = [g.cpu().detach().numpy().squeeze() for g in imgs]
+                        locs = [l.cpu().detach().numpy() for l in locs]
                     pickle.dump(
                         imgs, open(
                             self.plot_dir + "g_{}.p".format(epoch+1),
