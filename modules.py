@@ -99,8 +99,11 @@ class retina(object):
             T = im.shape[-1]
 
             # compute slice indices
-            from_x, to_x = patch_x[i], patch_x[i] + size
-            from_y, to_y = patch_y[i], patch_y[i] + size
+            from_x = coords[i,0] - (size[i] // 2)
+            from_y = coords[i,1] - (size[i] // 2)
+ 
+            to_x = from_x + size[i]
+            to_y = from_y + size[i]
             
             # cast to ints
             from_x, to_x = from_x.item(), to_x.item()
@@ -109,26 +112,41 @@ class retina(object):
             # pad tensor in case exceeds
             if self.exceeds(from_x, to_x, from_y, to_y, T):
                 pad_dims = (
-                    size//2+1, size//2+1,
-                    size//2+1, size//2+1,
+                    size[i]//2+1, size[i]//2+1,
+                    size[i]//2+1, size[i]//2+1,
                     0, 0,
                     0, 0,
                 )
                 im = F.pad(im, pad_dims, "constant", 0)
 
                 # add correction factor
-                from_x += (size//2+1)
-                to_x += (size//2+1)
-                from_y += (size//2+1)
-                to_y += (size//2+1)
+                from_x += (size[i]//2+1)
+                to_x += (size[i]//2+1)
+                from_y += (size[i]//2+1)
+                to_y += (size[i]//2+1)
 
             # and finally extract
             patch.append(im[:, :, from_y:to_y, from_x:to_x])
 
         # concatenate into a single tensor
-        patch = torch.cat(patch)
+        # patch = torch.cat(patch)
 
-        return patch
+        # put patches of different size into a dict
+        patch_dict = {}
+        for num in [32, 16, 8, 4, 2, 1]:
+            idx = self.get_index_of_this_size(size, num)
+            if len(idx) > 0:
+                patch_dict["size_"+str(num)] = torch.cat(
+                    [patch[i] for i in idx], 0) 
+
+        return patch_dict
+
+    def get_index_of_this_size(self, size_batch, size):
+        # for a batch of size
+        # get the idx of a particular size within the batch
+        w = (size_batch == size).squeeze().nonzero()
+        return w.numpy().flatten().tolist()
+        
 
     def denormalize(self, T, coords):
         """
@@ -169,7 +187,8 @@ class BasicBlock(nn.Module):
       norm_layer = nn.BatchNorm2d
     if groups != 1:
       raise ValueError('BasicBlock only supports groups=1')
-    # Both self.conv1 and self.downsample layers downsample the input when stride != 1
+    # Both self.conv1 and self.downsample layers 
+    # downsample the input when stride != 1
     
     self.conv1 = conv3x3(inplanes, planes, stride)
     self.bn1 = norm_layer(planes)
@@ -238,54 +257,80 @@ class glimpse_network(nn.Module):
       representation returned by the glimpse network for the
       current timestep `t`.
     """
-    def __init__(self, block, h_g, h_l, g, k, s, c):
+    def __init__(self, block, h_g, h_l, h_s, g, k, s, c):
         super(glimpse_network, self).__init__()
         self.retina = retina(g, k, s)
-
-        # glimpse layer for image
-        self.planes = [3, 12, 24, 48]
-        self.num_blocks = [1 for _ in range(3)]
-
-        self.res_blocks = []
-        for i in range(len(self.planes) -1):
-            res_block = nn.Sequential(
-                self._make_layer(block, self.planes[i], self.num_blocks[i]),
-                nn.Conv2d(self.planes[i], self.planes[i+1],
-                          kernel_size=2, stride=2),
-                nn.ReLU(inplace=True)
-            )
-            self.res_blocks.append(res_block)
         
-        self.feature_extractor = nn.Sequential(*self.res_blocks)
+        # input layers of residue blocks
+        self.planes = [3, 12, 24, 48, 96, 192]
         
+        # number of basic block per residue layer
+        self.num_block = 1
+        self.size_options = [2, 4, 8, 16, 32]
+        self.size_options_t = torch.Tensor(self.size_options).long()
 
-        self.fc1 = nn.Linear(self.planes[-1], h_g)
+        # 5 feature extractors for images of different size
+        self.feature_extractors = {}
+        num_residue_layers = 1
+        for input_size in self.size_options:
+            res_blocks = []
+            for i in range(num_residue_layers):
+                res_block = nn.Sequential(
+                    self._make_layer(block, self.planes[i], self.num_block),
+                    nn.Conv2d(self.planes[i], self.planes[i+1],
+                              kernel_size=2, stride=2),
+                    nn.BatchNorm2d(self.planes[i+1]),
+                    nn.ReLU(inplace=True)
+                )
+                res_blocks.append(res_block)
+            self.feature_extractors['size_'+str(input_size)] = nn.Sequential(
+            *res_blocks)
+            num_residue_layers = num_residue_layers + 1
 
-        # location layer
-        D_in = 2
-        self.fc2 = nn.Linear(D_in, h_l)
+        self.feature_encoders = {}
+        i = 1
+        for input_size in self.size_options:
+            self.feature_encoders['size_'+str(input_size)] = nn.Linear(
+            self.planes[i], h_g)
+            i = i + 1
+            
+        # encode location
+        self.fc_1 = nn.Linear(2, h_l)
+        
+        # encode size
+        self.fc_2 = nn.Linear(5, h_s)
 
-        self.fc3 = nn.Linear(h_g, h_g+h_l)
-        self.fc4 = nn.Linear(h_l, h_g+h_l)
+        self.fc_what = nn.Linear(h_g, h_g+h_l+h_s)
+        self.fc_where = nn.Linear(h_l, h_g+h_l+h_s)
+        self.fc_size = nn.Linear(h_s, h_g+h_l+h_s)
 
-    def forward(self, x, l_t_prev):
-        # generate glimpse phi from image x
-        phi = self.retina.foveate(x, l_t_prev)
-        # extract features from the glimpse
-        phi = self.feature_extractor(phi)
 
-        # flatten the feature
-        phi = phi.view(phi.shape[0], -1)
+    def forward(self, x, l_t_prev, size_t_prev):
+        size_idx = torch.argmax(size_t_prev, 1).view(-1,1)
+        size_t_prev_int = self.size_options_t[size_idx]
+        phi = self.retina.extract_patch(x, l_t_prev, size_t_prev_int)
+        
+        feature_batch = []
+        for k, v in phi.items():
+            f = self.feature_extractors[k](v)
+            f = f.view(f.shape[0], -1)
+            f = F.relu(self.feature_encoders[k](f))
+            feature_batch.append(f)
 
-        # feed phi and l to respective fc layers
-        phi_out = F.relu(self.fc1(phi))
-        l_out = F.relu(self.fc2(l_t_prev))
+        # concatenate features into one batch
+        feature_batch = torch.cat(feature_batch,0)
 
-        what = self.fc3(phi_out)
-        where = self.fc4(l_out)
+        what = self.fc_what(feature_batch)
+        
+        l_out = F.relu(self.fc_1(l_t_prev))
+        where = self.fc_where(l_out)
+
+        s_out = F.relu(self.fc_2(size_t_prev))
+        size = self.fc_size(s_out)
+        
 
         # feed to fc layer
-        g_t = F.relu(what + where)
+        g_t = F.relu(what + where + size)
 
         return g_t
 
@@ -378,8 +423,8 @@ class action_network(nn.Module):
 class location_network(nn.Module):
     """
     Uses the internal state `h_t` of the core network to
-    produce the location coordinates `l_t` for the next
-    time step.
+    produce the location coordinates `l_t` and size 
+    of subimage for the next time step
 
     Concretely, feeds the hidden state `h_t` through a fc
     layer followed by a tanh to clamp the output beween
@@ -408,11 +453,16 @@ class location_network(nn.Module):
     def __init__(self, input_size, output_size, std):
         super(location_network, self).__init__()
         self.std = std
-        self.fc = nn.Linear(input_size, output_size)
+        # fc layer to decide next location
+        self.fc_loc = nn.Linear(input_size, output_size)
+        
+        # fc layer to decide next size
+        # 5 possiblities
+        self.fc_size = nn.Linear(input_size, 5)
 
     def forward(self, h_t):
         # compute mean
-        mu = torch.tanh(self.fc(h_t.detach()))
+        mu = torch.tanh(self.fc_loc(h_t.detach()))
 
         # reparametrization trick
         noise = torch.zeros_like(mu)
@@ -422,7 +472,10 @@ class location_network(nn.Module):
         # bound between [-1, 1]
         l_t = torch.tanh(l_t)
 
-        return mu, l_t
+        # size of next patch
+        size_t = torch.softmax(self.fc_size(h_t.detach()), dim=1)
+
+        return mu, l_t, size_t
 
 
 class baseline_network(nn.Module):

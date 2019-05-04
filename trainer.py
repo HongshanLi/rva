@@ -43,10 +43,12 @@ class Trainer(object):
         self.num_patches = config.num_patches
         self.loc_hidden = config.loc_hidden
         self.glimpse_hidden = config.glimpse_hidden
+        self.size_hidden = config.size_hidden
 
         # core network params
         self.num_glimpses = config.num_glimpses
-        self.hidden_size = config.hidden_size
+        self.hidden_size = config.glimpse_hidden + \
+        config.loc_hidden + config.size_hidden 
 
         # reinforce params
         self.std = config.std
@@ -65,6 +67,7 @@ class Trainer(object):
         self.num_channels = 3
 
         # training params
+        self.batch_size = config.batch_size
         self.epochs = config.epochs
         self.start_epoch = 0
         self.momentum = config.momentum
@@ -103,8 +106,8 @@ class Trainer(object):
         # build RAM model
         self.model = RecurrentAttention(
             self.patch_size, self.num_patches, self.glimpse_scale,
-            self.num_channels, self.loc_hidden, self.glimpse_hidden,
-            self.std, self.hidden_size, self.num_classes,
+            self.num_channels, self.glimpse_hidden, self.loc_hidden,
+            self.size_hidden,self.std, self.num_classes,
         )
         if self.use_gpu:
             print("Using GPU")
@@ -126,8 +129,8 @@ class Trainer(object):
 
     def reset(self):
         """
-        Initialize the hidden state of the core network
-        and the location vector.
+        Initialize the hidden state of the core network,
+        location and size 
 
         This is called once every time a new minibatch
         `x` is introduced.
@@ -139,10 +142,14 @@ class Trainer(object):
         h_t = torch.zeros(self.batch_size, self.hidden_size)
         h_t = Variable(h_t).type(dtype)
 
-        l_t = torch.Tensor(self.batch_size, 2).uniform_(-1, 1)
+        l_t = torch.Tensor(self.batch_size, 2).fill_(0.0)
         l_t = Variable(l_t).type(dtype)
 
-        return h_t, l_t
+        s_t = torch.zeros([self.batch_size, 5], dtype=torch.float32)
+        s_t[:, 4] = 1.0
+        s_t = Variable(s_t).type(dtype)
+
+        return h_t, l_t, s_t
 
     def train(self):
         """
@@ -171,7 +178,9 @@ class Trainer(object):
             train_loss, train_acc = self.train_one_epoch(epoch)
 
             # evaluate on validation set
-            valid_loss, valid_acc = self.validate(epoch)
+            # valid_loss, valid_acc = self.validate(epoch)
+            valid_loss, valid_acc = 1, 1
+        
 
             # # reduce lr if validation loss plateaus
             # self.scheduler.step(valid_loss)
@@ -214,8 +223,16 @@ class Trainer(object):
         accs = AverageMeter()
 
         tic = time.time()
+        
+        # score for each different size
+        # the lower the better
+        size_score = torch.Tensor([1, 2, 3, 4, 5]).repeat(
+            self.batch_size*self.num_glimpses)
+        size_score = size_score.view(self.batch_size, self.num_glimpses, 5)
+        
         with tqdm(total=self.num_train) as pbar:
             for i, (x, y) in enumerate(self.train_loader):
+
                 if self.use_gpu:
                     x, y = x.cuda(), y.cuda()
                 
@@ -225,7 +242,7 @@ class Trainer(object):
 
                 # initialize location vector and hidden state
                 self.batch_size = x.shape[0]
-                h_t, l_t = self.reset()
+                h_t, l_t, size_t = self.reset()
 
                 # save images
                 imgs = []
@@ -233,33 +250,46 @@ class Trainer(object):
 
                 # extract the glimpses
                 locs = []
+                sizes = []
                 log_pi = []
                 baselines = []
                 for t in range(self.num_glimpses - 1):
                     # forward pass through model
-                    h_t, l_t, b_t, p = self.model(x, l_t, h_t)
+                    h_t, l_t, size_t, b_t, p = self.model(x, l_t, size_t, h_t)
 
                     # store
                     locs.append(l_t[0:9])
                     baselines.append(b_t)
                     log_pi.append(p)
+                    sizes.append(size_t)
 
                 # last iteration
-                h_t, l_t, b_t, log_probas, p = self.model(
-                    x, l_t, h_t, last=True
+                h_t, l_t, size_t, b_t, log_probas, p = self.model(
+                    x, l_t, size_t, h_t, last=True
                 )
                 log_pi.append(p)
                 baselines.append(b_t)
                 locs.append(l_t[0:9])
+                sizes.append(size_t)
 
                 # convert list to tensors and reshape
+                
                 baselines = torch.stack(baselines).transpose(1, 0)
                 log_pi = torch.stack(log_pi).transpose(1, 0)
 
                 # calculate reward
                 predicted = torch.max(log_probas, 1)[1]
                 R = (predicted.detach() == y).float()
+
+                # calculate reward for each glimpse
+                # 1 if prediction is correct
+                # 0 otherwise
                 R = R.unsqueeze(1).repeat(1, self.num_glimpses)
+
+                # compute the loss for the size of each glimpse
+                size = torch.stack(sizes).transpose(1, 0)
+                loss_size = size * size_score
+                loss_size = torch.sum(loss_size) / self.batch_size 
 
                 # compute losses for differentiable modules
                 loss_action = F.nll_loss(log_probas, y)
@@ -272,7 +302,8 @@ class Trainer(object):
                 loss_reinforce = torch.mean(loss_reinforce, dim=0)
 
                 # sum up into a hybrid loss
-                loss = loss_action + loss_baseline + loss_reinforce
+                loss = loss_action + loss_baseline + \
+                    loss_reinforce + loss_size
                 
                
                 # compute accuracy
@@ -349,22 +380,22 @@ class Trainer(object):
 
             # initialize location vector and hidden state
             self.batch_size = x.shape[0]
-            h_t, l_t = self.reset()
+            h_t, l_t, size_t = self.reset()
 
             # extract the glimpses
             log_pi = []
             baselines = []
             for t in range(self.num_glimpses - 1):
                 # forward pass through model
-                h_t, l_t, b_t, p = self.model(x, l_t, h_t)
+                h_t, l_t, size_t, b_t, p = self.model(x, l_t, size_t, h_t)
 
                 # store
                 baselines.append(b_t)
                 log_pi.append(p)
 
             # last iteration
-            h_t, l_t, b_t, log_probas, p = self.model(
-                x, l_t, h_t, last=True
+            h_t, l_t, size_t, b_t, log_probas, p = self.model(
+                x, l_t, size_t, h_t, last=True
             )
             log_pi.append(p)
             baselines.append(b_t)

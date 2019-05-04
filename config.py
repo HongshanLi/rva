@@ -26,13 +26,14 @@ glimpse_arg.add_argument('--loc_hidden', type=int, default=128,
                          help='hidden size of loc fc')
 glimpse_arg.add_argument('--glimpse_hidden', type=int, default=128,
                          help='hidden size of glimpse fc')
-
+glimpse_arg.add_argument('--size_hidden', type=int, default=32,
+                         help="hidden size of size fc")
 
 # core network params
 core_arg = add_argument_group('Core Network Params')
-core_arg.add_argument('--num_glimpses', type=int, default=6,
+core_arg.add_argument('--num_glimpses', type=int, default=2,
                       help='# of glimpses, i.e. BPTT iterations')
-core_arg.add_argument('--hidden_size', type=int, default=256,
+core_arg.add_argument('--hidden_size', type=int, default=288,
                       help='hidden size of rnn')
 
 
@@ -48,7 +49,7 @@ reinforce_arg.add_argument('--M', type=float, default=10,
 data_arg = add_argument_group('Data Params')
 data_arg.add_argument('--valid_size', type=float, default=0.1,
                       help='Proportion of training set used for validation')
-data_arg.add_argument('--batch_size', type=int, default=32,
+data_arg.add_argument('--batch_size', type=int, default=10,
                       help='# of images in each batch of data')
 data_arg.add_argument('--num_workers', type=int, default=4,
                       help='# of subprocesses to use for data loading')

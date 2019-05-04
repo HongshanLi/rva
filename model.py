@@ -31,22 +31,24 @@ class RecurrentAttention(nn.Module):
                  c,
                  h_g,
                  h_l,
+                 h_s, 
                  std,
-                 hidden_size,
                  num_classes):
         """
         Initialize the recurrent attention model and its
         different components.
 
+
         Args
         ----
-        - g: size of the square patches in the glimpses extracted
-          by the retina.
+        - g: initial size of the square patches in the glimpses extracted
+          by the retina. Default value is 32
         - k: number of patches to extract per glimpse.
         - s: scaling factor that controls the size of successive patches.
         - c: number of channels in each image.
         - h_g: hidden layer size of the fc layer for `phi`.
         - h_l: hidden layer size of the fc layer for `l`.
+        - h_s: hidden layer size for the size of each patch
         - std: standard deviation of the Gaussian policy.
         - hidden_size: hidden size of the rnn.
         - num_classes: number of classes in the dataset.
@@ -55,14 +57,16 @@ class RecurrentAttention(nn.Module):
         """
         super(RecurrentAttention, self).__init__()
         self.std = std
-
-        self.sensor = glimpse_network(BasicBlock, h_g, h_l, g, k, s, c)
+        hidden_size = h_g + h_l + h_s
+        
+        self.sensor = glimpse_network(BasicBlock, h_g, h_l, h_s, g, k, s, c)
         self.rnn = core_network(hidden_size, hidden_size)
         self.locator = location_network(hidden_size, 2, std)
         self.classifier = action_network(hidden_size, num_classes)
         self.baseliner = baseline_network(hidden_size, 1)
 
-    def forward(self, x, l_t_prev, h_t_prev, last=False):
+    def forward(self, x, l_t_prev, size_t_prev, 
+        h_t_prev, last=False):
         """
         Run the recurrent attention model for 1 timestep
         on the minibatch of images `x`.
@@ -74,6 +78,9 @@ class RecurrentAttention(nn.Module):
         - l_t_prev: a 2D tensor of shape (B, 2). The location vector
           containing the glimpse coordinates [x, y] for the previous
           timestep `t-1`.
+        - size_t_prev: a 2D tensor of shape (B, *) where * is the size
+          of the patch for the glimpse net to look at. Smaller size
+          induces higher reward
         - h_t_prev: a 2D tensor of shape (B, hidden_size). The hidden
           state vector for the previous timestep `t-1`.
         - last: a bool indicating whether this is the last timestep.
@@ -98,9 +105,12 @@ class RecurrentAttention(nn.Module):
           output log probability vector over the classes.
         - log_pi: a vector of length (B,).
         """
-        g_t = self.sensor(x, l_t_prev)
+        g_t = self.sensor(x, l_t_prev, size_t_prev)
         h_t = self.rnn(g_t, h_t_prev)
-        mu, l_t = self.locator(h_t)
+        
+        # locator decide the next location as well as
+        # the size of the next batch to look at
+        mu, l_t, size_t = self.locator(h_t)
         b_t = self.baseliner(h_t).squeeze()
 
         # we assume both dimensions are independent
@@ -111,6 +121,6 @@ class RecurrentAttention(nn.Module):
 
         if last:
             log_probas = self.classifier(h_t)
-            return h_t, l_t, b_t, log_probas, log_pi
+            return h_t, l_t, size_t, b_t, log_probas, log_pi
 
-        return h_t, l_t, b_t, log_pi
+        return h_t, l_t, size_t, b_t, log_pi
