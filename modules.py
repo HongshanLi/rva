@@ -4,7 +4,17 @@ import torch.nn.functional as F
 
 from torch.autograd import Variable
 
-import numpy as np
+import numpy as np 
+from config import get_config
+
+config, unparsed = get_config() 
+if config.use_gpu:
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+    else:
+        raise "Cuda device is not available"
+else:
+    device = torch.device("cpu")
 
 
 class retina(object):
@@ -86,9 +96,10 @@ class retina(object):
         B, C, H, W = x.shape
 
         # denormalize coords of patch center
-        coords = self.denormalize(H, l)
+        coords = self.denormalize(H, l).cpu()
 
         # compute top left corner of patch
+        
         patch_x = coords[:, 0] - (size // 2)
         patch_y = coords[:, 1] - (size // 2)
 
@@ -133,7 +144,7 @@ class retina(object):
 
         # put patches of different size into a dict
         patch_dict = {}
-        for num in [32, 16, 8, 4, 2, 1]:
+        for num in [32, 16, 8, 4, 2]:
             idx = self.get_index_of_this_size(size, num)
             if len(idx) > 0:
                 patch_dict["size_"+str(num)] = torch.cat(
@@ -267,7 +278,8 @@ class glimpse_network(nn.Module):
         # number of basic block per residue layer
         self.num_block = 1
         self.size_options = [2, 4, 8, 16, 32]
-        self.size_options_t = torch.Tensor(self.size_options).long()
+        self.size_options_t = torch.Tensor(
+            self.size_options).long()
 
         # 5 feature extractors for images of different size
         self.feature_extractors = {}
@@ -284,14 +296,14 @@ class glimpse_network(nn.Module):
                 )
                 res_blocks.append(res_block)
             self.feature_extractors['size_'+str(input_size)] = nn.Sequential(
-            *res_blocks)
+            *res_blocks).to(device)
             num_residue_layers = num_residue_layers + 1
 
         self.feature_encoders = {}
         i = 1
         for input_size in self.size_options:
             self.feature_encoders['size_'+str(input_size)] = nn.Linear(
-            self.planes[i], h_g)
+            self.planes[i], h_g).to(device)
             i = i + 1
             
         # encode location
@@ -337,7 +349,7 @@ class glimpse_network(nn.Module):
     def _make_layer(self, block, planes, num_blocks):
         layers = []
         for _ in range(num_blocks):
-            layers.append(block(planes, planes))
+            layers.append(block(planes, planes).to(device))
         return nn.Sequential(*layers)
 
 class core_network(nn.Module):

@@ -15,8 +15,16 @@ from utils import AverageMeter
 from model import RecurrentAttention
 from tensorboard_logger import configure, log_value
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-print(device)
+from config import get_config
+
+config, unparsed = get_config() 
+if config.use_gpu:
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+    else:
+        raise "Cuda device is not available"
+else:
+    device = torch.device("cpu")
 
 class Trainer(object):
     """
@@ -229,7 +237,7 @@ class Trainer(object):
         size_score = torch.Tensor([1, 2, 3, 4, 5]).repeat(
             self.batch_size*self.num_glimpses)
         size_score = size_score.view(self.batch_size, self.num_glimpses, 5)
-        
+        size_score = size_score.to(device) 
         with tqdm(total=self.num_train) as pbar:
             for i, (x, y) in enumerate(self.train_loader):
 
@@ -367,6 +375,7 @@ class Trainer(object):
         """
         Evaluate the model on the validation set.
         """
+        start = time.time()
         losses = AverageMeter()
         accs = AverageMeter()
 
@@ -450,6 +459,9 @@ class Trainer(object):
                 iteration = epoch*len(self.valid_loader) + i
                 log_value('valid_loss', losses.avg, iteration)
                 log_value('valid_acc', accs.avg, iteration)
+
+            end = time.time()
+            print("Time for validation is: {}".format(end-start))
 
         return losses.avg, accs.avg
 
